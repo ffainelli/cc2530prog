@@ -311,56 +311,90 @@ static int cc2530_gpio_deinit(void)
 	return 0;
 }
 
-/*
- * Hold reset low while raising clock twice
- */
-static int cc2530_enter_debug(void)
+
+static void delay_ns(unsigned int ns)
 {
-	int i;
-
-	/* pulse RST low */
-	gpio_set_value(RST_GPIO, RST_GPIO_POL 0);
-
-	for (i = 0; i < 2; i++) {
-		gpio_set_value(CCLK_GPIO, 0);
-		gpio_set_value(CCLK_GPIO, 1);
-	}
-
-	/* Keep clock low */
-	gpio_set_value(CCLK_GPIO, 0);
-
-	/* pulse Reset high */
-	gpio_set_value(RST_GPIO, RST_GPIO_POL 1);
-
-	debug_enabled = 1;
-
-	return 0;
+    struct timespec sleeper, dummy;
+    sleeper.tv_sec  = 0;
+    sleeper.tv_nsec = ns ;
+    nanosleep (&sleeper, &dummy) ;
 }
+
+void delay (unsigned int millis)
+{
+  struct timespec sleeper, dummy ;
+
+  sleeper.tv_sec  = (time_t)(millis / 1000) ;
+  sleeper.tv_nsec = (long)(millis % 1000) * 1000000 ;
+  nanosleep (&sleeper, &dummy) ;
+}
+
 
 static int cc2530_leave_debug(void)
 {
-	gpio_set_value(RST_GPIO, RST_GPIO_POL 0);
-	gpio_set_value(RST_GPIO, RST_GPIO_POL 1);
-
-	return 0;
+    gpio_set_value(RST_GPIO, 0);
+    delay(100);
+    gpio_set_value(RST_GPIO, 1);
+    return 0;
 }
+
+
+/*
+ * Hold reset low while raising clock twice
+ */
+
+
+static int cc2530_enter_debug(void)
+{
+
+    cc2530_leave_debug();
+    gpio_set_value(CCLK_GPIO, 0);
+    gpio_set_value(DATA_GPIO, 0);
+
+
+    gpio_set_value(RST_GPIO, 0);
+    delay(10);
+    gpio_set_value(CCLK_GPIO, 0);
+    delay(1);
+    gpio_set_value(CCLK_GPIO, 1);
+    delay(1);
+    gpio_set_value(CCLK_GPIO, 0);
+    delay(1);
+    gpio_set_value(CCLK_GPIO, 1);
+    delay(1);
+    gpio_set_value(CCLK_GPIO, 0);
+    delay(1);
+    gpio_set_value(RST_GPIO, 1);
+    delay(10);
+
+    debug_enabled = 1;
+
+    return 0;
+}
+
 
 /*
  * Bit-bang a byte on the GPIO data line
  */
 static inline void send_byte(unsigned char byte)
 {
-	int i;
+    int i;
 
-	/* Data setup on rising clock edge */
-	for (i = 7; i >= 0; i--) {
-		if (byte & (1 << i))
-			gpio_set_value(DATA_GPIO, 1);
-		else
-			gpio_set_value(DATA_GPIO, 0);
-		gpio_set_value(CCLK_GPIO, 1);
-		gpio_set_value(CCLK_GPIO, 0);
-	}
+    /* Data setup on rising clock edge */
+    for (i = 7; i >= 0; i--) {
+        //
+        if (byte & (1 << i))
+            gpio_set_value(DATA_GPIO, 1);
+        else
+            gpio_set_value(DATA_GPIO, 0);
+
+
+        gpio_set_value(CCLK_GPIO, 1);
+        delay_ns(1);
+
+        gpio_set_value(CCLK_GPIO, 0);
+        delay_ns(1);
+    }
 }
 
 /*
@@ -368,19 +402,26 @@ static inline void send_byte(unsigned char byte)
  */
 static inline void read_byte(unsigned char *byte)
 {
-	int i;
-	bool val;
-	*byte = 0;
+    int i;
+    bool val;
+    *byte = 0;
 
-	/* data read on falling clock edge */
-	for (i = 7; i >= 0; i--) {
-		gpio_set_value(CCLK_GPIO, 1);
-		gpio_get_value(DATA_GPIO, &val);
-		if (val)
-			*byte |= (1 << i);
-		gpio_set_value(CCLK_GPIO, 0);
-	}
+    /* data read on falling clock edge */
+    for (i = 7; i >= 0; i--) {
+
+        gpio_set_value(CCLK_GPIO, 1);
+        delay_ns(1);
+
+        gpio_get_value(DATA_GPIO, &val);
+
+        if (val)
+            *byte |= (1 << i);
+
+        gpio_set_value(CCLK_GPIO, 0);
+
+    }
 }
+
 
 /*
  * Send the command to the chip
